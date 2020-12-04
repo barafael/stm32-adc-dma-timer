@@ -41,7 +41,9 @@ bool adc1_data_ready = false;
                              ADC_CFGR_DISCEN | ADC_CFGR_DISCNUM |\
                              ADC_CFGR_EXTEN  | ADC_CFGR_EXTSEL))
 
-void do_dummy_conversion(ADC_HandleTypeDef *hadc) {
+const uint32_t tim15trg_cfgr = ((ADC_EXTERNALTRIG_T15_TRGO & ADC_CFGR_EXTSEL) | ADC_EXTERNALTRIGCONVEDGE_RISING);
+
+void do_dummy_conversion(ADC_HandleTypeDef *hadc, uint32_t cfgr) {
 	CLEAR_BIT(hadc->Instance->CFGR, ADC_CFGR_DMAEN);
 
 	/* Set software trigger (0) */
@@ -50,13 +52,12 @@ void do_dummy_conversion(ADC_HandleTypeDef *hadc) {
 	HAL_ADC_Start(hadc);
 	HAL_StatusTypeDef status = HAL_BUSY;
 	while (status != HAL_OK) { status = HAL_ADC_PollForConversion(hadc, 10); }
-	HAL_ADC_GetValue(&hadc1);
+	HAL_ADC_GetValue(hadc);
 
-	HAL_ADC_Stop(&hadc1);
+	HAL_ADC_Stop(hadc);
 
-	/* Set to timer 15 trigger out rising edge */
-	uint32_t cfgr_mask = ((ADC_EXTERNALTRIG_T15_TRGO & ADC_CFGR_EXTSEL) | ADC_EXTERNALTRIGCONVEDGE_RISING);
-	MODIFY_REG(hadc->Instance->CFGR, ADC_CFGR_FIELDS_1, cfgr_mask);
+	/* Restore cfgr fields */
+	MODIFY_REG(hadc->Instance->CFGR, ADC_CFGR_FIELDS_1, cfgr);
 }
 
 /* USER CODE END Includes */
@@ -67,14 +68,14 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         if (adc1_dma_buffer == adc1_buffer_1) {
             adc1_dma_buffer = adc1_buffer_2;
 
-            do_dummy_conversion(hadc);
+            do_dummy_conversion(hadc, tim15trg_cfgr);
 
             HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_dma_buffer, ADC1_DMA_BUFFER_LENGTH);
 
         } else {
             adc1_dma_buffer = adc1_buffer_1;
 
-            do_dummy_conversion(hadc);
+            do_dummy_conversion(hadc, tim15trg_cfgr);
 
             HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_dma_buffer, ADC1_DMA_BUFFER_LENGTH);
             adc1_process_buffer = adc1_buffer_2;
