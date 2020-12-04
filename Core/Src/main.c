@@ -26,11 +26,62 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "stdbool.h"
+
+#define ADC1_DMA_BUFFER_LENGTH 8
+uint16_t adc1_buffer_1[ADC1_DMA_BUFFER_LENGTH] = {};
+uint16_t adc1_buffer_2[ADC1_DMA_BUFFER_LENGTH] = {};
+uint16_t *adc1_dma_buffer = adc1_buffer_1;
+uint16_t *adc1_process_buffer = adc1_buffer_2;
+
+bool adc1_data_ready = false;
+
+#define ADC_CFGR_FIELDS_1  ((ADC_CFGR_RES    | ADC_CFGR_ALIGN   |\
+                             ADC_CFGR_CONT   | ADC_CFGR_OVRMOD  |\
+                             ADC_CFGR_DISCEN | ADC_CFGR_DISCNUM |\
+                             ADC_CFGR_EXTEN  | ADC_CFGR_EXTSEL))
+
+void do_dummy_conversion(ADC_HandleTypeDef *hadc) {
+	CLEAR_BIT(hadc->Instance->CFGR, ADC_CFGR_DMAEN);
+
+	/* Set software trigger (0) */
+	MODIFY_REG(hadc->Instance->CFGR, ADC_CFGR_FIELDS_1, 0u);
+
+	HAL_ADC_Start(hadc);
+	HAL_StatusTypeDef status = HAL_BUSY;
+	while (status != HAL_OK) { status = HAL_ADC_PollForConversion(hadc, 10); }
+	HAL_ADC_GetValue(&hadc1);
+
+	HAL_ADC_Stop(&hadc1);
+
+	/* Set to timer 15 trigger out rising edge */
+	uint32_t cfgr_mask = ((ADC_EXTERNALTRIG_T15_TRGO & ADC_CFGR_EXTSEL) | ADC_EXTERNALTRIGCONVEDGE_RISING);
+	MODIFY_REG(hadc->Instance->CFGR, ADC_CFGR_FIELDS_1, cfgr_mask);
+}
 
 /* USER CODE END Includes */
-
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
+    if (hadc->Instance == ADC1) {
+        if (adc1_dma_buffer == adc1_buffer_1) {
+            adc1_dma_buffer = adc1_buffer_2;
+
+            do_dummy_conversion(hadc);
+
+            HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_dma_buffer, ADC1_DMA_BUFFER_LENGTH);
+
+        } else {
+            adc1_dma_buffer = adc1_buffer_1;
+
+            do_dummy_conversion(hadc);
+
+            HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_dma_buffer, ADC1_DMA_BUFFER_LENGTH);
+            adc1_process_buffer = adc1_buffer_2;
+        }
+        adc1_data_ready = true;
+    }
+}
 
 /* USER CODE END PTD */
 
@@ -92,7 +143,10 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM15_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_Base_Start(&htim15);
+  while (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK);
 
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_process_buffer, ADC1_DMA_BUFFER_LENGTH);
   /* USER CODE END 2 */
 
   /* Infinite loop */
